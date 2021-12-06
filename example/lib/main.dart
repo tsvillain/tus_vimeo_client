@@ -31,6 +31,7 @@ class _UploadPageState extends State<UploadPage> {
   XFile _file;
   TusClient _client;
   Uri _fileUrl;
+  bool canMove = false;
 
   @override
   Widget build(BuildContext context) {
@@ -89,17 +90,39 @@ class _UploadPageState extends State<UploadPage> {
                           : () async {
                               // Create a client
                               print("Create a client");
+                              final size = await _file.length();
+                              print("Video size: $size");
                               _client = TusClient(
-                                Uri.parse("https://master.tus.io/files/"),
-                                _file,
-                                store: TusMemoryStore(),
-                              );
+                                  Uri.parse("https://api.vimeo.com/me/videos"),
+                                  _file,
+                                  headers: {
+                                    "Accept":
+                                        "application/vnd.vimeo.*+json;version=3.4",
+                                    "Content-Type": "application/json",
+                                  },
+                                  token: "b96100dcf50481656483e351a07d28c3",
+                                  body: {
+                                    "upload": {
+                                      "approach": "tus",
+                                      "size": size.toString(),
+                                    },
+                                    "name": "Random Name",
+                                    "description": "Random Desc",
+                                    "privacy": {
+                                      "embed": "private",
+                                    }
+                                  });
 
                               print("Starting upload");
                               await _client.upload(
                                 onComplete: () async {
                                   print("Completed!");
-                                  setState(() => _fileUrl = _client.uploadUrl);
+                                  print(_client.vimeoDetails.body);
+                                  // _client.vimeoDetails;
+                                  setState(() {
+                                    canMove = true;
+                                    _fileUrl = _client.uploadUrl;
+                                  });
                                 },
                                 onProgress: (progress) {
                                   print("Progress: $progress");
@@ -119,6 +142,23 @@ class _UploadPageState extends State<UploadPage> {
                               _client.pause();
                             },
                       child: Text("Pause"),
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: canMove
+                          ? () async {
+                              bool result = await _client.moveVideoToFolder(
+                                  folderId: "6738893");
+                              if (result) {
+                                print("Moved to the folder");
+                              } else {
+                                print("Failed to Moved the folder");
+                              }
+                            }
+                          : null,
+                      child: Text("Move to Folder"),
                     ),
                   ),
                 ],

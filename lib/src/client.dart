@@ -1,4 +1,4 @@
-import 'dart:convert' show base64, utf8;
+import 'dart:convert' show base64, jsonDecode, jsonEncode, utf8;
 import 'dart:math' show min;
 import 'dart:typed_data' show Uint8List, BytesBuilder;
 import 'exceptions.dart';
@@ -6,7 +6,6 @@ import 'store.dart';
 
 import 'package:cross_file/cross_file.dart' show XFile;
 import 'package:http/http.dart' as http;
-import "package:path/path.dart" as p;
 
 /// This class is used for creating or resuming uploads.
 class TusClient {
@@ -22,10 +21,14 @@ class TusClient {
 
   final XFile file;
 
-  final Map<String, String>? metadata;
-
   /// Any additional headers
   final Map<String, String>? headers;
+
+  /// Vimeo API token
+  final String token;
+
+  /// body
+  final Map<String, dynamic>? body;
 
   /// The maximum payload size in bytes when uploading the file in chunks (512KB)
   final int maxChunkSize;
@@ -34,26 +37,26 @@ class TusClient {
 
   String _fingerprint = "";
 
-  String? _uploadMetadata;
-
   Uri? _uploadUrl;
 
   int? _offset;
 
   bool _pauseUpload = false;
 
-  Future? _chunkPatchFuture;
+  Future<http.Response?>? _chunkPatchFuture;
+
+  http.Response? _vimeoDetails;
 
   TusClient(
     this.url,
     this.file, {
     this.store,
     this.headers,
-    this.metadata = const {},
-    this.maxChunkSize = 512 * 1024,
+    this.body,
+    required this.token,
+    this.maxChunkSize = 1024 * 1024,
   }) {
     _fingerprint = generateFingerprint() ?? "";
-    _uploadMetadata = generateMetadata();
   }
 
   /// Whether the client supports resuming
@@ -62,11 +65,11 @@ class TusClient {
   /// The URI on the server for the file
   Uri? get uploadUrl => _uploadUrl;
 
+  /// Response of Vimeo Post request
+  http.Response? get vimeoDetails => _vimeoDetails;
+
   /// The fingerprint of the file being uploaded
   String get fingerprint => _fingerprint;
-
-  /// The 'Upload-Metadata' header sent to server
-  String get uploadMetadata => _uploadMetadata ?? "";
 
   /// Override this method to use a custom Client
   http.Client getHttpClient() => http.Client();
@@ -77,20 +80,22 @@ class TusClient {
 
     final client = getHttpClient();
     final createHeaders = Map<String, String>.from(headers ?? {})
-      ..addAll({
-        "Tus-Resumable": tusVersion,
-        "Upload-Metadata": _uploadMetadata ?? "",
-        "Upload-Length": "$_fileSize",
-      });
+      ..addAll({"Authorization": "Bearer $token"});
 
-    final response = await client.post(url, headers: createHeaders);
+    final response = await client.post(
+      url,
+      headers: createHeaders,
+      body: jsonEncode(body),
+    );
     if (!(response.statusCode >= 200 && response.statusCode < 300) &&
         response.statusCode != 404) {
       throw ProtocolException(
           "unexpected status code (${response.statusCode}) while creating upload");
     }
 
-    String urlStr = response.headers["location"] ?? "";
+    _vimeoDetails = response;
+
+    String urlStr = await jsonDecode(response.body)['upload']['upload_link'];
     if (urlStr.isEmpty) {
       throw ProtocolException(
           "missing upload Uri in response for creating upload");
@@ -136,22 +141,24 @@ class TusClient {
     final client = getHttpClient();
 
     while (!_pauseUpload && (_offset ?? 0) < totalBytes) {
-      final uploadHeaders = Map<String, String>.from(headers ?? {})
-        ..addAll({
-          "Tus-Resumable": tusVersion,
-          "Upload-Offset": "$_offset",
-          "Content-Type": "application/offset+octet-stream"
-        });
+      final uploadHeaders = Map<String, String>.from({
+        "Tus-Resumable": tusVersion,
+        "Upload-Offset": "$_offset",
+        "Content-Type": "application/offset+octet-stream",
+        "Accept": "application/vnd.vimeo.*+json;version=3.4",
+      });
+
       _chunkPatchFuture = client.patch(
         _uploadUrl as Uri,
         headers: uploadHeaders,
         body: await _getData(),
       );
+
       final response = await _chunkPatchFuture;
       _chunkPatchFuture = null;
 
       // check if correctly uploaded
-      if (!(response.statusCode >= 200 && response.statusCode < 300)) {
+      if (!(response!.statusCode >= 200 && response.statusCode < 300)) {
         throw ProtocolException(
             "unexpected status code (${response.statusCode}) while uploading chunk");
       }
@@ -186,6 +193,27 @@ class TusClient {
     _chunkPatchFuture?.timeout(Duration.zero, onTimeout: () {});
   }
 
+  Future<bool> moveVideoToFolder({required String folderId}) async {
+    if (_vimeoDetails != null) {
+      final client = getHttpClient();
+      final createHeaders = {"Authorization": "Bearer $token"};
+      String videoId = jsonDecode(_vimeoDetails!.body)['uri'];
+      videoId = videoId.substring(videoId.lastIndexOf('/'));
+      final response = await client.put(
+        Uri.parse(
+            "https://api.vimeo.com/me/projects/$folderId/videos/$videoId"),
+        headers: createHeaders,
+      );
+      if (!(response.statusCode >= 200 && response.statusCode < 300) &&
+          response.statusCode != 404) {
+        throw ProtocolException(
+            "unexpected status code (${response.statusCode}) while moving video");
+      }
+      return true;
+    }
+    return false;
+  }
+
   /// Actions to be performed after a successful upload
   void onComplete() {
     store?.remove(_fingerprint);
@@ -196,28 +224,15 @@ class TusClient {
     return file.path.replaceAll(RegExp(r"\W+"), '.');
   }
 
-  /// Override this to customize creating 'Upload-Metadata'
-  String generateMetadata() {
-    final meta = Map<String, String>.from(metadata ?? {});
-
-    if (!meta.containsKey("filename")) {
-      meta["filename"] = p.basename(file.path);
-    }
-
-    return meta.entries
-        .map((entry) =>
-            entry.key + " " + base64.encode(utf8.encode(entry.value)))
-        .join(",");
-  }
-
   /// Get offset from server throwing [ProtocolException] on error
   Future<int> _getOffset() async {
     final client = getHttpClient();
 
-    final offsetHeaders = Map<String, String>.from(headers ?? {})
-      ..addAll({
-        "Tus-Resumable": tusVersion,
-      });
+    final offsetHeaders = Map<String, String>.from({
+      "Tus-Resumable": tusVersion,
+      "Accept": "application/vnd.vimeo.*+json;version=3.4",
+    });
+
     final response =
         await client.head(_uploadUrl as Uri, headers: offsetHeaders);
 
