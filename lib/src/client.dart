@@ -236,10 +236,9 @@ class TusClient {
             "unexpected status code (${response.statusCode}) while retriving video url");
       }
       final res = jsonDecode(response.body);
-      print('files:: ${res['files']}');
-      print('status:: ${res['status']}');
       while (res['status'] != "available") {
         _processingVideo = true;
+        await Future.delayed(Duration(seconds: 10));
         return getVideoHLSlink();
       }
       videoUrl = res['files'].firstWhere((e) => e['quality'] == "hls")['link'];
