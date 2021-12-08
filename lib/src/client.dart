@@ -43,6 +43,8 @@ class TusClient {
 
   bool _pauseUpload = false;
 
+  bool _processingVideo = false;
+
   Future<http.Response?>? _chunkPatchFuture;
 
   http.Response? _vimeoDetails;
@@ -61,6 +63,9 @@ class TusClient {
 
   /// Whether the client supports resuming
   bool get resumingEnabled => store != null;
+
+  /// true if video is uploaded and transcoding
+  bool get isVideoProcessing => _processingVideo;
 
   /// The URI on the server for the file
   Uri? get uploadUrl => _uploadUrl;
@@ -230,8 +235,15 @@ class TusClient {
         throw ProtocolException(
             "unexpected status code (${response.statusCode}) while retriving video url");
       }
-      videoUrl = jsonDecode(response.body)['files']
-          .firstWhere((e) => e['quality'] == "hls")['link'];
+      final res = jsonDecode(response.body);
+      print('files:: ${res['files']}');
+      print('status:: ${res['status']}');
+      while (res['status'] != "available") {
+        _processingVideo = true;
+        return getVideoHLSlink();
+      }
+      videoUrl = res['files'].firstWhere((e) => e['quality'] == "hls")['link'];
+      _processingVideo = false;
     }
     return videoUrl;
   }
