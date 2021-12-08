@@ -214,6 +214,28 @@ class TusClient {
     return false;
   }
 
+  Future<String?> getVideoHLSlink() async {
+    String? videoUrl;
+    if (_vimeoDetails != null) {
+      final client = getHttpClient();
+      final createHeaders = {"Authorization": "Bearer $token"};
+      String videoId = jsonDecode(_vimeoDetails!.body)['uri'];
+      videoId = videoId.substring(videoId.lastIndexOf('/'));
+      final response = await client.get(
+        Uri.parse("https://api.vimeo.com/videos/$videoId"),
+        headers: createHeaders,
+      );
+      if (!(response.statusCode >= 200 && response.statusCode < 300) &&
+          response.statusCode != 404) {
+        throw ProtocolException(
+            "unexpected status code (${response.statusCode}) while retriving video url");
+      }
+      videoUrl = jsonDecode(response.body)['files']
+          .firstWhere((e) => e['quality'] == "hls")['link'];
+    }
+    return videoUrl;
+  }
+
   /// Actions to be performed after a successful upload
   void onComplete() {
     store?.remove(_fingerprint);
