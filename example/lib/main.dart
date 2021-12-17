@@ -139,7 +139,7 @@ class _UploadPageState extends State<UploadPage> {
                       onPressed: _progress == 0
                           ? null
                           : () async {
-                              _client.pause();
+                              // _client.pause();
                             },
                       child: Text("Pause"),
                     ),

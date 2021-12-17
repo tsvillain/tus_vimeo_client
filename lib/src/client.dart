@@ -193,9 +193,33 @@ class TusClient {
   }
 
   /// Pause the current upload
-  pause() {
+  pause() async {
     _pauseUpload = true;
-    _chunkPatchFuture?.timeout(Duration.zero, onTimeout: () {});
+    _chunkPatchFuture?.timeout(Duration.zero, onTimeout: null);
+    await deleteVideo();
+    _uploadUrl = null;
+    _offset = null;
+    _vimeoDetails = null;
+    _fingerprint = "";
+    _processingVideo = false;
+    _chunkPatchFuture = null;
+  }
+
+  Future deleteVideo() async {
+    final client = getHttpClient();
+    final createHeaders = {"Authorization": "Bearer $token"};
+    String videoId = jsonDecode(_vimeoDetails!.body)['uri'];
+    videoId = videoId.substring(videoId.lastIndexOf('/'));
+    final response = await client.delete(
+      Uri.parse("https://api.vimeo.com/videos/$videoId"),
+      headers: createHeaders,
+    );
+    print(response.statusCode);
+    if (!(response.statusCode >= 200 && response.statusCode < 300) &&
+        response.statusCode != 404) {
+      throw ProtocolException(
+          "unexpected status code (${response.statusCode}) while moving video");
+    }
   }
 
   Future<bool> moveVideoToFolder({required String folderId}) async {
