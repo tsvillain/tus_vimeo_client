@@ -31,7 +31,7 @@ class TusClient {
   final Map<String, dynamic>? body;
 
   /// The maximum payload size in bytes when uploading the file in chunks (512KB)
-  final int maxChunkSize;
+  int maxChunkSize;
 
   int? _fileSize;
 
@@ -56,7 +56,9 @@ class TusClient {
     this.headers,
     this.body,
     required this.token,
-    this.maxChunkSize = 1024 * 1024,
+    this.maxChunkSize = 1024 * 1024, //1MB
+    // this.maxChunkSize = 512000, //512KB
+    // this.maxChunkSize = 10000000, //10MB
   }) {
     _fingerprint = generateFingerprint() ?? "";
   }
@@ -82,6 +84,9 @@ class TusClient {
   /// Create a new [upload] throwing [ProtocolException] on server error
   create() async {
     _fileSize = await file.length();
+    if (_fileSize != null) {
+      maxChunkSize = int.parse((_fileSize! / 10).toString());
+    }
 
     final client = getHttpClient();
     final createHeaders = Map<String, String>.from(headers ?? {})
