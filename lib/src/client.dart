@@ -85,7 +85,7 @@ class TusClient {
   create() async {
     _fileSize = await file.length();
     if (_fileSize != null) {
-      maxChunkSize = int.parse((_fileSize! / 10).toString());
+      maxChunkSize = _fileSize! ~/ 10;
     }
 
     final client = getHttpClient();
