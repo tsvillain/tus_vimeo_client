@@ -84,10 +84,12 @@ class TusClient {
   /// Create a new [upload] throwing [ProtocolException] on server error
   create() async {
     _fileSize = await file.length();
-    if (_fileSize != null) {
-      maxChunkSize = _fileSize! ~/ 10;
+    if (_fileSize != null && _fileSize! < 1073741824) {
+      maxChunkSize = _fileSize! ~/ 50;
+    } else {
+      maxChunkSize = 10000000;
     }
-
+    
     final client = getHttpClient();
     final createHeaders = Map<String, String>.from(headers ?? {})
       ..addAll({"Authorization": "Bearer $token"});
