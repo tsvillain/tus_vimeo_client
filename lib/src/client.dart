@@ -89,7 +89,7 @@ class TusClient {
     } else {
       maxChunkSize = 10000000;
     }
-
+    
     final client = getHttpClient();
     final createHeaders = Map<String, String>.from(headers ?? {})
       ..addAll({"Authorization": "Bearer $token"});
@@ -272,24 +272,10 @@ class TusClient {
         await Future.delayed(Duration(seconds: 10));
         return getVideoHLSlink();
       }
-      videoUrl = _getVideoHLSlink(res);
+      videoUrl = res['files'].firstWhere((e) => e['quality'] == "hls")['link'];
       _processingVideo = false;
     }
     return videoUrl;
-  }
-
-  static String? _getVideoHLSlink(res) {
-    if (res['files'] != null &&
-        res['files'] is List &&
-        (res['files'] as List).isNotEmpty) {
-      return res['files'].firstWhere((e) => e['quality'] == "hls")['link'];
-    } else if (res['play']['progressive'] != null &&
-        res['play']['progressive'] is List &&
-        (res['play']['progressive'] as List).isNotEmpty) {
-      return res['play']['hls'].last['link'];
-    } else {
-      return null;
-    }
   }
 
   /// Actions to be performed after a successful upload
